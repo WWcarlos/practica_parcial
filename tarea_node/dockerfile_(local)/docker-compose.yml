@@ -1,0 +1,6 @@
+services:
+  node_dockerfile: # este servicio se construye desde nuestro Dockerfile
+    build: .
+    container_name: node_dockerfile
+    ports:
+      - "3000:3000"

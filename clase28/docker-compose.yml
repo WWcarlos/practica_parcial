@@ -1,0 +1,14 @@
+services:
+  mi_servicio: #este servicio se construye desde una imagen de dockerhub
+
+    image: python
+    container_name: python_dockerhub
+    command: ["python","-c","print('Hola desde el contenedor')"]
+
+  otro_servicio: #desde dockerfile
+    build: .
+    container_name: python_dockerfile
+    ports:
+      - "5007:5007"
+
+

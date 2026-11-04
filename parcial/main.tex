@@ -1,0 +1,382 @@
+% Compilar en Overleaf con pdfLaTeX
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{Madrid}
+\usecolortheme{whale}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstdefinestyle{codigo}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  keepspaces=true,
+  showstringspaces=false
+}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black}
+}
+
+\title{Contenedores con Docker}
+\subtitle{Dockerfile, Docker Compose y API REST en Laravel}
+\author{Albeiro Montes}
+\institute{Ingeniería de Software II / Proyecto CRUD Laravel}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Agenda}
+  \tableofcontents
+\end{frame}
+
+% ============================================================
+\section{¿Por qué contenedores?}
+% ============================================================
+
+\begin{frame}{Del código a producción}
+  \begin{itemize}
+    \item En local funciona; en el servidor de un compañero, no.
+    \item Dependencias distintas: versión de PHP, extensiones, MySQL, rutas.
+    \item Objetivo: \textbf{mismo entorno} para desarrollo, pruebas y despliegue.
+  \end{itemize}
+  \vspace{0.5em}
+  \begin{block}{Idea clave}
+    Empaquetar la aplicación con todo lo que necesita para ejecutarse, de forma aislada y reproducible.
+  \end{block}
+\end{frame}
+
+\begin{frame}{Máquina virtual vs contenedor}
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+    \textbf{VM}
+    \begin{itemize}
+      \item SO completo invitado
+      \item Hypervisor
+      \item Arranque lento, más RAM
+    \end{itemize}
+    \column{0.48\textwidth}
+    \textbf{Contenedor}
+    \begin{itemize}
+      \item Comparte el kernel del host
+      \item Solo procesos y filesystem aislados
+      \item Ligero, segundos para levantar
+    \end{itemize}
+  \end{columns}
+  \vspace{0.8em}
+  \centering
+  \small Host $\rightarrow$ Docker Engine $\rightarrow$ Contenedores (Apache + PHP, MySQL)
+\end{frame}
+
+\begin{frame}{Vocabulario Docker}
+  \begin{description}
+    \item[Imagen] Plantilla de solo lectura (capas). Ej.: \texttt{mysql:8.0}, \texttt{php:8.2-apache}.
+    \item[Contenedor] Instancia en ejecución de una imagen.
+    \item[Dockerfile] Receta para \textbf{construir} una imagen propia (tu app PHP + extensiones).
+    \item[Docker Compose] Archivo YAML que define \textbf{varios servicios} y cómo se conectan.
+    \item[Volumen] Carpeta del host montada en el contenedor (el código de Laravel).
+    \item[Red] Permite que \texttt{app} resuelva el host \texttt{db} por nombre.
+  \end{description}
+\end{frame}
+
+% ============================================================
+\section{Arquitectura del proyecto}
+% ============================================================
+
+\begin{frame}{API Laravel en contenedores}
+  \textbf{Caso: CRUD / API REST} con Laravel, Apache y MySQL.
+  \vspace{0.5em}
+  \begin{itemize}
+    \item \textbf{Apache + PHP}: un solo servicio (\texttt{app}) recibe HTTP en el puerto 80 y ejecuta Laravel.
+    \item El documento raíz es \texttt{public/}; \texttt{mod\_rewrite} y \texttt{.htaccess} envían las rutas a \texttt{index.php}.
+    \item \textbf{MySQL}: base de datos del CRUD.
+  \end{itemize}
+  \vspace{0.5em}
+  \begin{alertblock}{Flujo de una petición}
+    Cliente $\rightarrow$ Apache $\rightarrow$ Laravel $\rightarrow$ MySQL
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}[fragile]{Imágenes base a descargar (pull)}
+  Antes de construir, se descargan las imágenes que usa el proyecto:
+\begin{lstlisting}[language=bash]
+docker pull php:8.2-apache
+docker pull composer:2
+docker pull mysql:8.0
+\end{lstlisting}
+  \vspace{0.3em}
+  \begin{itemize}
+    \item \texttt{php:8.2-apache}: PHP 8.2 con Apache (base del Dockerfile).
+    \item \texttt{composer:2}: aporta el binario de Composer (build); \texttt{vendor/} se genera al arrancar el contenedor.
+    \item \texttt{mysql:8.0}: base de datos, usada tal cual por Compose.
+  \end{itemize}
+  \vspace{0.2em}
+  \small La imagen de \textbf{tu aplicación} no se descarga: se genera con \texttt{docker compose build}.
+\end{frame}
+
+% ============================================================
+\section{Paso a paso del proyecto}
+% ============================================================
+
+\begin{frame}[fragile]{Paso 1: Requisitos en el equipo}
+  \begin{enumerate}
+    \item Instalar \textbf{Docker Desktop} (Windows/Mac) o Docker Engine + Compose (Linux).
+    \item Verificar:
+  \end{enumerate}
+\begin{lstlisting}[language=bash]
+docker --version
+docker compose version
+\end{lstlisting}
+  \begin{enumerate}
+    \setcounter{enumi}{2}
+    \item Tener el \textbf{proyecto Laravel (API) ya creado en el host} (Composer/PHP local).
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}[fragile]{Paso 2: Laravel en el host + preparar Docker}
+  \textbf{Partimos de una app existente} en la carpeta del repo (CRUD / \texttt{routes/api.php}).
+  \vspace{0.4em}
+  \begin{enumerate}
+    \item Añadir \texttt{dockerfile}, \texttt{docker-compose.yml} y \texttt{entrypoint.sh} en la raíz del proyecto Laravel.
+    \item Crear \texttt{.env} para cuando la app corre \textbf{dentro} de Compose (\texttt{DB\_HOST=db}, usuario \texttt{root}):
+  \end{enumerate}
+\begin{lstlisting}
+APP_NAME=Laravel
+APP_ENV=local
+APP_KEY=
+APP_DEBUG=true
+APP_URL=http://localhost:8080
+
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=root
+DB_PASSWORD=secret
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{Paso 3: Dockerfile (visión general)}
+  El Dockerfile \textbf{parte de PHP con Apache} e instala lo que Laravel necesita:
+  \begin{itemize}
+    \item Extensiones: \texttt{pdo\_mysql}, \texttt{mbstring}, \texttt{bcmath}, \texttt{gd}.
+    \item \texttt{mod\_rewrite} y \texttt{AllowOverride All} para que funcione \texttt{public/.htaccess}.
+    \item Document root de Apache en \texttt{/var/www/html/public}.
+    \item Composer (imagen \texttt{composer:2}) instala \texttt{vendor/} al \textbf{arrancar} el contenedor, porque el volumen del host reemplaza el código de la imagen.
+    \item Permisos de \texttt{www-data} en \texttt{storage} y \texttt{bootstrap/cache}.
+  \end{itemize}
+  \vspace{0.3em}
+  Cada instrucción \texttt{RUN} añade una capa a la imagen.
+\end{frame}
+
+\begin{frame}[fragile]{Dockerfile de referencia}
+\begin{lstlisting}[language=bash,basicstyle=\ttfamily\scriptsize]
+FROM php:8.2-apache
+
+RUN apt-get update && apt-get install -y \
+    git unzip libpng-dev libonig-dev libxml2-dev \
+    && docker-php-ext-install pdo_mysql mbstring bcmath gd \
+    && a2enmod rewrite \
+    && sed -ri -e 's!/var/www/html!/var/www/html/public!g' \
+       /etc/apache2/sites-available/*.conf \
+    && sed -ri -e 's!AllowOverride None!AllowOverride All!g' \
+       /etc/apache2/apache2.conf \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY entrypoint.sh /usr/local/bin/laravel-entrypoint.sh
+RUN chmod +x /usr/local/bin/laravel-entrypoint.sh
+
+WORKDIR /var/www/html
+EXPOSE 80
+ENTRYPOINT ["laravel-entrypoint.sh"]
+\end{lstlisting}
+  \small \texttt{ENTRYPOINT} ejecuta \texttt{entrypoint.sh} cada vez que arranca el contenedor \texttt{app}.
+\end{frame}
+
+\begin{frame}{entrypoint.sh: ¿por qué existe?}
+  En \texttt{docker-compose.yml} montamos \texttt{.:/var/www/html}:
+  \begin{itemize}
+    \item El código del host \textbf{sustituye} lo copiado en la imagen al construirla.
+    \item Si en el PC no hay carpeta \texttt{vendor/}, Laravel falla con \texttt{autoload.php}.
+    \item Solución: al \textbf{iniciar} el contenedor, un script ejecuta \texttt{composer install} y luego Apache.
+  \end{itemize}
+  \vspace{0.4em}
+  \begin{block}{Montaje en el Dockerfile}
+    \texttt{COPY entrypoint.sh} $\rightarrow$ \texttt{/usr/local/bin/laravel-entrypoint.sh} \\
+    \texttt{ENTRYPOINT ["laravel-entrypoint.sh"]}
+  \end{block}
+  \vspace{0.3em}
+  \small En Overleaf, el listado usa estilo \texttt{codigo} (sin resaltado \texttt{bash}) para que el shebang \texttt{\#!/bin/bash} no desaparezca.
+\end{frame}
+
+\begin{frame}[fragile]{entrypoint.sh: código completo}
+\begin{lstlisting}[style=codigo]
+#!/bin/bash
+set -e
+
+cd /var/www/html
+
+composer install --no-interaction --prefer-dist --optimize-autoloader
+
+chown -R www-data:www-data storage bootstrap/cache
+
+exec docker-php-entrypoint apache2-foreground
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{entrypoint.sh: línea por línea}
+  \small
+  \begin{description}
+    \item[\texttt{\#!/bin/bash}] Intérprete del script.
+    \item[\texttt{set -e}] Si un comando falla, el contenedor se detiene (no arranca Apache a medias).
+    \item[\texttt{cd /var/www/html}] Directorio de Laravel (coincide con el volumen montado).
+    \item[\texttt{composer install ...}] Crea o actualiza \texttt{vendor/} \textbf{dentro del contenedor}.
+    \item[\texttt{chown ...}] Laravel puede escribir en \texttt{storage} y \texttt{bootstrap/cache}.
+    \item[\texttt{exec docker-php-entrypoint ...}] Arranca Apache en primer plano (proceso principal del contenedor).
+  \end{description}
+\end{frame}
+
+\begin{frame}{Paso 4: Docker Compose (visión general)}
+  \texttt{docker-compose.yml} declara dos servicios:
+  \begin{itemize}
+    \item \texttt{app}: \texttt{build: .} usa el Dockerfile. Publica el puerto \texttt{8080} del host en el \texttt{80} de Apache.
+    \item \texttt{db}: imagen \texttt{mysql:8.0}, base \texttt{laravel} y contraseña de root \texttt{secret}.
+  \end{itemize}
+  \vspace{0.4em}
+  El volumen \texttt{.:/var/www/html} monta el código del host dentro del contenedor. Ambos servicios comparten red, así Laravel llega a MySQL con \texttt{DB\_HOST=db}.
+\end{frame}
+
+\begin{frame}[fragile]{docker-compose.yml}
+\begin{lstlisting}[language=bash]
+services:
+  app:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: laravel
+      MYSQL_ROOT_PASSWORD: secret
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Paso 5: Levantar el entorno}
+\begin{lstlisting}[language=bash]
+# Descargar imagenes y construir la app
+docker compose pull
+docker compose build
+
+# Al arrancar, el contenedor ejecuta composer install
+docker compose up
+
+# Ver estado
+docker compose ps
+\end{lstlisting}
+  Abrir en el navegador: \texttt{http://localhost:8080}
+\end{frame}
+
+\begin{frame}[fragile]{Paso 6: Laravel dentro del contenedor}
+\begin{lstlisting}[language=bash]
+# Clave de aplicacion (escribe APP_KEY en .env)
+docker compose exec app php artisan key:generate
+
+# Migraciones (tablas del CRUD)
+docker compose exec app php artisan migrate
+
+# Rutas API (ejemplo)
+docker compose exec app php artisan route:list
+\end{lstlisting}
+  Los endpoints REST viven en \texttt{routes/api.php} y los controladores en \texttt{app/Http/Controllers}.
+\end{frame}
+
+\begin{frame}[fragile]{Paso 7: Desarrollo diario}
+\begin{lstlisting}[language=bash]
+# Logs de Apache y de PHP
+docker compose logs -f app
+
+# Entrar al contenedor de la aplicacion
+docker compose exec app bash
+
+# Parar los contenedores
+docker compose stop
+
+# Parar y eliminar contenedores
+docker compose down
+\end{lstlisting}
+  \vspace{0.3em}
+  \small MySQL no tiene un volumen con nombre: \texttt{docker compose down} elimina también los datos de la base.
+\end{frame}
+
+% ============================================================
+\section{Comandos útiles}
+% ============================================================
+
+\begin{frame}[fragile]{Imágenes y contenedores}
+\begin{lstlisting}[language=bash]
+docker pull php:8.2-apache
+docker pull composer:2
+docker pull mysql:8.0
+
+docker images
+docker ps
+docker ps -a
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Depuración rápida}
+  \begin{itemize}
+    \item \textbf{La página no abre}: el contenedor \texttt{app} no está en marcha o el puerto publicado no es \texttt{8080}.
+    \item \textbf{vendor/autoload.php}: falta \texttt{vendor/}; reconstruir y levantar (\texttt{entrypoint.sh} ejecuta \texttt{composer install}) o \texttt{docker compose exec app composer install}.
+    \item \textbf{Error 500}: falta \texttt{.env} o \texttt{APP\_KEY}. Generar la clave con \texttt{artisan key:generate}.
+    \item \textbf{SQLSTATE connection refused}: \texttt{DB\_HOST} debe ser \texttt{db}, el usuario \texttt{root} y la contraseña \texttt{secret}. MySQL puede tardar unos segundos en aceptar conexiones.
+    \item \textbf{Permisos Laravel}: \texttt{storage} y \texttt{bootstrap/cache} deben ser escribibles por \texttt{www-data}.
+  \end{itemize}
+\begin{lstlisting}[language=bash]
+docker compose exec db mysql -uroot -psecret laravel
+\end{lstlisting}
+\end{frame}
+
+% ============================================================
+\section{Resumen}
+% ============================================================
+
+\begin{frame}{Resumen}
+  \begin{itemize}
+    \item Contenedor = entorno reproducible; Compose = orquestación local de varios servicios.
+    \item \textbf{Pull}: \texttt{php:8.2-apache}, \texttt{composer:2} y \texttt{mysql:8.0}. La app se construye con el Dockerfile.
+    \item Apache sirve \texttt{public/} y Laravel se conecta con \texttt{DB\_HOST=db}, usuario \texttt{root} y contraseña \texttt{secret}.
+    \item Flujo: \texttt{dockerfile} + \texttt{entrypoint.sh} + Compose $\rightarrow$ \texttt{up} (Composer en el contenedor) $\rightarrow$ \texttt{key:generate} y \texttt{migrate} $\rightarrow$ API en el puerto 8080.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Referencias}
+  \small
+  \begin{itemize}
+    \item Documentación Docker: \url{https://docs.docker.com/}
+    \item Imágenes oficiales PHP, Composer y MySQL en Docker Hub.
+    \item Laravel: despliegue y configuración \texttt{.env}.
+  \end{itemize}
+  \vspace{1em}
+  \centering
+  ¿Preguntas?
+\end{frame}
+
+\end{document}

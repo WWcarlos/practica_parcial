@@ -1,0 +1,5 @@
+docker build -t api .
+
+docker run -d --name api --network redapi -p 5000:5000 api
+
+  (se usa sin las \)

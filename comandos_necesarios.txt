@@ -1,0 +1,3 @@
+docker network create redapi
+
+docker run -d --name mysql --network redapi -e MYSQL_ROOT_PASSWORD=clave -e MYSQL_DATABASE=prueba mysql:8
